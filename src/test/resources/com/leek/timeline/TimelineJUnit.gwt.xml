@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module rename-to="Timeline">
+  <!-- Inherit our applications main module.                      -->
+  <inherits name='com.leek.timeline.Timeline' />
+
+</module>
