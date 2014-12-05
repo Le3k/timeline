@@ -296,8 +296,17 @@ public class Timeline implements IsWidget, RequiresResize, FiresTimelineEvents
 		});
 	}
 	
-	private TimeBlock findBlock(String rowId, long millis)
+	/**
+	 * Finds a block for the given time.
+	 * @param rowId row ID.
+	 * @param millis time
+	 * @return found block or <code>null</code> if not found.
+	 */
+	private TimeBlock findBlock(String rowId, Long millis)
 	{
+		if (millis == null)
+			return null;
+		
 		Iterator<TimeBlock> it = rowTimeBlocks.get(rowId).iterator();
 		boolean stop = false;
 		TimeBlock block = null;
