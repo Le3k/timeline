@@ -27,7 +27,7 @@ public class StatsBlock
 	}
 
 	/**
-	 * @return the percent
+	 * @return the percent as a value between 0.0 and 1.0
 	 */
 	public float getPercent()
 	{
@@ -35,7 +35,7 @@ public class StatsBlock
 	}
 
 	/**
-	 * @param percent the percent to set
+	 * @param percent the percent as a value between 0.0 and 1.0
 	 */
 	public void setPercent(float percent)
 	{
