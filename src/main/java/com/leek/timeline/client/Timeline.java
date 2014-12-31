@@ -46,6 +46,8 @@ import com.leek.timeline.client.IntervalChangeEvent.Handler;
 public class Timeline implements IsWidget, RequiresResize, FiresTimelineEvents
 {
 
+	private static final String ROW_BG_COLOR = "rgba(150, 150, 150, 0.8)";
+
 	/**
 	 * Event handlers manager.
 	 */
@@ -55,6 +57,7 @@ public class Timeline implements IsWidget, RequiresResize, FiresTimelineEvents
 	private static final int ROWS_SPACING = 2;
 	private static final int LABEL_HEIGHT = 15;
 	private static final int SPACING = 4;
+	private static final int STATS_VIEWPORT_WIDTH = 150;
 	/**
 	 * Space between the viewport and the right side of the widget.
 	 */
@@ -88,6 +91,7 @@ public class Timeline implements IsWidget, RequiresResize, FiresTimelineEvents
 	private Map<String, String> rowIcons = new HashMap<>();
 	private Map<String, String> rowHeadings = new HashMap<>();
 	private Map<String, SortedSet<TimeBlock>> rowTimeBlocks = new HashMap<>();
+	private Map<String, List<StatsBlock>> rowStatsBlocks = new HashMap<>();
 	
 	private String timeZone = null;
 	
@@ -137,17 +141,21 @@ public class Timeline implements IsWidget, RequiresResize, FiresTimelineEvents
 	 * May be <code>null</code>; in such case, no cursor line will be displayed.<br/>
 	 * Value is relative to canvas border.
 	 */
-	private Integer mouseMoveX = null;
+	private Integer timeBrowseX = null;
 	/**
 	 * Mouse position to display the cursor line at.
 	 * May be <code>null</code>; in such case, no cursor line will be displayed.<br/>
 	 * Value is relative to canvas border.
 	 */
-	private Integer mouseMoveY = null;
+	private Integer timeBrowseY = null;
 	/**
 	 * Time representing the current mouse position.
 	 */
-	private Long mouseMoveTime = null;
+	private Long timeBrowseMillis = null;
+	
+	private Integer statsBrowseX = null;
+	private Integer statsBrowseY = null;
+	private Float statsBrowsePercent = null;
 	
 	/**
 	 * X offset of last drag.
@@ -183,7 +191,7 @@ public class Timeline implements IsWidget, RequiresResize, FiresTimelineEvents
 			@Override
 			public void onMouseWheel(MouseWheelEvent event)
 			{
-				if (mouseMoveTime == null)
+				if (timeBrowseMillis == null)
 					return;
 				
 				long oldInterval = TimeUtils.intervalInMillis(startDate, endDate);
@@ -196,9 +204,9 @@ public class Timeline implements IsWidget, RequiresResize, FiresTimelineEvents
 				if (newInterval > MAX_INTERVAL)
 					newInterval = MAX_INTERVAL;
 				
-				int mouseOffsetX = mouseMoveX - VIEWPORT_OFFSET_X;
-				long mouseOffsetMillis = newInterval * mouseOffsetX / getViewportWidth();
-				startDate = new Date(mouseMoveTime - mouseOffsetMillis);
+				int mouseOffsetX = timeBrowseX - VIEWPORT_OFFSET_X;
+				long mouseOffsetMillis = newInterval * mouseOffsetX / getTimeViewportWidth();
+				startDate = new Date(timeBrowseMillis - mouseOffsetMillis);
 				endDate = new Date(startDate.getTime() + newInterval);
 				
 				redraw();
@@ -215,37 +223,61 @@ public class Timeline implements IsWidget, RequiresResize, FiresTimelineEvents
 
 				int rowsCount = rowIds.size();
 				
-				int maxX = getViewportMaxX()
-					, maxY = VIEWPORT_OFFSET_Y + rowsCount * (SPACING + ROW_HEIGHT);
+				int timeViewportMaxX = getTimeViewportMaxX()
+					, maxY = VIEWPORT_OFFSET_Y + rowsCount * (SPACING + ROW_HEIGHT)
+					, statsViewportX = getStatsViewportX()
+					, statsViewportMaxX = statsViewportX + STATS_VIEWPORT_WIDTH;
 				
-				mouseMoveX = null;
-				mouseMoveY = null;
-				mouseMoveTime = null;
 				mouseRow = null;
 				
-				if (event.getX() >= VIEWPORT_OFFSET_X 
-					&& event.getX() <= maxX
-					&& event.getY() >= VIEWPORT_OFFSET_Y
-					&& event.getY() <= maxY)
+				// mouse-on-time-viewport management:
+				timeBrowseX = null;
+				timeBrowseY = null;
+				timeBrowseMillis = null;
+				
+				if (event.getY() >= VIEWPORT_OFFSET_Y
+					&& event.getY() <= maxY
+					&& event.getX() >= VIEWPORT_OFFSET_X && event.getX() <= timeViewportMaxX)
 				{
-					mouseMoveX = event.getX();
-					mouseMoveY = event.getY();
+					timeBrowseX = event.getX();
+					timeBrowseY = event.getY();
 					
-					int rowIndex = (mouseMoveY - VIEWPORT_OFFSET_Y) / (SPACING + ROW_HEIGHT);
+					int rowIndex = (event.getY() - VIEWPORT_OFFSET_Y) / (SPACING + ROW_HEIGHT);
 					int rowStart = VIEWPORT_OFFSET_Y + rowIndex * (SPACING + ROW_HEIGHT) + SPACING;
 					
 					if (event.getY() >= rowStart)
 					{	// Mouse is over a row
-						mouseMoveTime = getTimeFromX(mouseMoveX);
 						mouseRow = rowIds.get(rowIndex);
+						timeBrowseMillis = getTimeFromX(event.getX());
 					}
 					// Otherwise it's over a spacing.
+				}
+				
+				// mouse-on-stats-viewport management:
+				statsBrowseX = null;
+				statsBrowseY = null;
+				statsBrowsePercent = null;
+				
+				if (event.getY() >= VIEWPORT_OFFSET_Y
+					&& event.getY() <= maxY
+					&& event.getX() >= statsViewportX && event.getX() <= statsViewportMaxX)
+				{
+					int rowIndex = (event.getY() - VIEWPORT_OFFSET_Y) / (SPACING + ROW_HEIGHT);
+					int rowStart = VIEWPORT_OFFSET_Y + rowIndex * (SPACING + ROW_HEIGHT) + SPACING;
+					
+					if (event.getY() >= rowStart)
+					{	// Mouse is over a row
+						mouseRow = rowIds.get(rowIndex);
+						statsBrowseX = event.getX();
+						statsBrowseY = event.getY();
+						statsBrowsePercent = ((float) event.getX() - statsViewportX) / STATS_VIEWPORT_WIDTH;
+					}
 				}
 				
 				// DnD management:
 				if (dragX != null)
 				{
-					if (event.getX() < VIEWPORT_OFFSET_X || event.getX() > getViewportMaxX()
+					if (event.getX() < VIEWPORT_OFFSET_X || event.getX() > getTimeViewportMaxX()
 						|| event.getY() < VIEWPORT_OFFSET_Y || event.getY() > getViewportMaxY())
 					{
 						// mouse outside the viewport; drag ended
@@ -255,7 +287,7 @@ public class Timeline implements IsWidget, RequiresResize, FiresTimelineEvents
 					{
 						// we're dragging
 						int deltaPx = dragX - event.getX();
-						long deltaMillis = TimeUtils.intervalInMillis(startDate, endDate) * deltaPx / getViewportWidth();
+						long deltaMillis = TimeUtils.intervalInMillis(startDate, endDate) * deltaPx / getTimeViewportWidth();
 						// we modify the interval with setInterval(), which will fire an IntervalChangeEvent.
 						setInterval(
 								new Date(startDate.getTime() + deltaMillis), 
@@ -267,8 +299,12 @@ public class Timeline implements IsWidget, RequiresResize, FiresTimelineEvents
 				
 				redraw();
 				
-//				GWT.log("Firing BrowseEvent");
-				handlerManager.fireEvent(new BrowseEvent(mouseRow, mouseMoveTime == null ? null : new Date(mouseMoveTime)));
+				handlerManager.fireEvent(
+						new BrowseEvent(
+							event.getClientX(), event.getClientY(), 
+							mouseRow, 
+							timeBrowseMillis == null ? null : new Date(timeBrowseMillis), 
+							statsBrowsePercent));
 //				GWT.log("onmousemove processed in " + TimeUtils.intervalInMillis(dStart, new Date()));
 			}
 		});
@@ -278,7 +314,7 @@ public class Timeline implements IsWidget, RequiresResize, FiresTimelineEvents
 			public void onMouseDown(MouseDownEvent event)
 			{
 				// start drag state if in bounds:
-				if (event.getX() >= VIEWPORT_OFFSET_X && event.getY() <= getViewportMaxX()
+				if (event.getX() >= VIEWPORT_OFFSET_X && event.getY() <= getTimeViewportMaxX()
 					&& event.getY() >= VIEWPORT_OFFSET_Y && event.getY() <= getViewportMaxY())
 				{
 					dragX = event.getX();
@@ -321,9 +357,17 @@ public class Timeline implements IsWidget, RequiresResize, FiresTimelineEvents
 		return block;
 	}
 	
-	private int getViewportMaxX()
+	private int getTimeViewportMaxX()
 	{
-		return canvas.getCoordinateSpaceWidth() - RIGHT_SPACING;
+		return canvas.getCoordinateSpaceWidth() - SPACING - STATS_VIEWPORT_WIDTH - RIGHT_SPACING;
+	}
+	
+	/**
+	 * @return current viewport width.
+	 */
+	private int getTimeViewportWidth()
+	{
+		return getTimeViewportMaxX() - VIEWPORT_OFFSET_X;
 	}
 	
 	private int getViewportMaxY()
@@ -334,12 +378,9 @@ public class Timeline implements IsWidget, RequiresResize, FiresTimelineEvents
 				- SPACING - HALF_TICK;
 	}
 	
-	/**
-	 * @return current viewport width.
-	 */
-	private int getViewportWidth()
+	private int getStatsViewportX()
 	{
-		return getViewportMaxX() - VIEWPORT_OFFSET_X;
+		return VIEWPORT_OFFSET_X + getTimeViewportWidth() + SPACING;
 	}
 	
 	/**
@@ -372,11 +413,11 @@ public class Timeline implements IsWidget, RequiresResize, FiresTimelineEvents
 		drawRows();
 		
 		// Eventually draw cursor:
-		if (mouseMoveTime != null)
+		if (timeBrowseMillis != null)
 			drawCursor();
 		
 		// Eventually draw popup:
-		if (renderPopup && mouseMoveTime != null)
+		if (renderPopup && timeBrowseMillis != null)
 			drawPopup();
 	}
 
@@ -384,24 +425,24 @@ public class Timeline implements IsWidget, RequiresResize, FiresTimelineEvents
 	{
 		context.beginPath();
 		context.setStrokeStyle("blue");
-		context.moveTo(mouseMoveX, VIEWPORT_OFFSET_Y);
-		context.lineTo(mouseMoveX, getViewportMaxY());
+		context.moveTo(timeBrowseX, VIEWPORT_OFFSET_Y);
+		context.lineTo(timeBrowseX, getViewportMaxY());
 		context.stroke();
 	}
 
 	private void drawPopup()
 	{
-		String date = jsGetDateTimeFormat(mouseMoveTime, timeZone);
+		String date = jsGetDateTimeFormat(timeBrowseMillis, timeZone);
 		TextMetrics dateMeasure = context.measureText(date);
-		int x = mouseMoveX + SPACING
-			, y = mouseMoveY - SPACING
+		int x = timeBrowseX + SPACING
+			, y = timeBrowseY - SPACING
 			, w = (int) (SPACING + dateMeasure.getWidth() + SPACING)
 			, h = SPACING + LABEL_HEIGHT + SPACING;
 		// popup background:
 		context.setFillStyle("white");
 		context.fillRect(x, y, w, h);
 		// popup border:
-		TimeBlock mouseBlock = findBlock(mouseRow, mouseMoveTime);
+		TimeBlock mouseBlock = findBlock(mouseRow, timeBrowseMillis);
 		String color = mouseBlock == null ? "gray" : mouseBlock.getColor();
 		context.setLineWidth(2.0);
 		context.setStrokeStyle(color);
@@ -441,10 +482,10 @@ public class Timeline implements IsWidget, RequiresResize, FiresTimelineEvents
 		context.beginPath();
 		context.setStrokeStyle("rgba(0,0,0,0.5)");
 		context.strokeRect(VIEWPORT_OFFSET_X, VIEWPORT_OFFSET_Y, 
-							getViewportWidth(), getViewportHeight());
+							getTimeViewportWidth(), getViewportHeight());
 	}
 	
-	public int getPreferredHeight(int rowCount)
+	public static int getPreferredHeight(int rowCount)
 	{
 		return VIEWPORT_OFFSET_Y
 				+ (SPACING + ROW_HEIGHT) * rowCount	// rows + their spacing on top
@@ -461,8 +502,11 @@ public class Timeline implements IsWidget, RequiresResize, FiresTimelineEvents
 		if (startDate == null || endDate == null)
 			return;
 		
-		int viewportWidthPx = getViewportWidth();
-		long viewportWidthMillis = TimeUtils.intervalInMillis(startDate, endDate);
+		int timeViewportWidthPx = getTimeViewportWidth();
+		long timeViewportWidthMillis = TimeUtils.intervalInMillis(startDate, endDate);
+		
+		int stripe1WidthPx = ROW_HEADING_WIDTH + SPACING + timeViewportWidthPx
+			, statsViewportOffsetPx = SPACING + stripe1WidthPx + SPACING;
 		
 		for (int i = 0; i < rowIds.size(); i++)
 		{
@@ -472,16 +516,13 @@ public class Timeline implements IsWidget, RequiresResize, FiresTimelineEvents
 					VIEWPORT_OFFSET_Y
 					+ i * (SPACING + ROW_HEIGHT)
 					+ SPACING;
-					// This is the way of drawing them bottom-top:
-//					canvas.getCoordinateSpaceHeight() 
-//					- SPACING - LABEL_HEIGHT	// 'fronteer' label
-//					- SPACING - LABEL_HEIGHT	// 'tick' label
-//					- SPACING - TICK_HEIGHT	// tick indicator
-//					- (rowIds.size() - i) * ROWS_SPACING - (rowIds.size() - i) * ROW_HEIGHT;
 			
-			// Gray background:
-			context.setFillStyle("rgba(150, 150, 150, 0.8)");
-			context.fillRect(SPACING, offsetY, ROW_HEADING_WIDTH + SPACING + viewportWidthPx, ROW_HEIGHT);
+			// Gray background on icons, labels and time viewport:
+			context.setFillStyle(ROW_BG_COLOR);
+			context.fillRect(SPACING, offsetY, stripe1WidthPx, ROW_HEIGHT);
+			
+			// Gray background on stats viewport:
+			context.fillRect(statsViewportOffsetPx, offsetY, STATS_VIEWPORT_WIDTH, ROW_HEIGHT);
 			
 			// icon:
 			if (rowIcons.containsKey(rowId))
@@ -517,7 +558,7 @@ public class Timeline implements IsWidget, RequiresResize, FiresTimelineEvents
 				context.strokeText(text, HEADING_TEXT_OFFSET_X, textOffsetY, HEADING_TEXT_MAX_WIDTH);
 			}
 			
-			// blocks:
+			// time blocks:
 			if (rowTimeBlocks.containsKey(rowId))
 			{
 				Iterator<TimeBlock> it = rowTimeBlocks.get(rowId).iterator();
@@ -533,7 +574,7 @@ public class Timeline implements IsWidget, RequiresResize, FiresTimelineEvents
 								, blockEnd = block.getEnd().after(endDate) ? endDate : block.getEnd();
 							
 							long timeBlockWidthMillis = TimeUtils.intervalInMillis(blockStart, blockEnd);
-							int timeBlockWidthPx = (int) (((double) timeBlockWidthMillis / viewportWidthMillis) * viewportWidthPx);
+							int timeBlockWidthPx = (int) (((double) timeBlockWidthMillis / timeViewportWidthMillis) * timeViewportWidthPx);
 							if (timeBlockWidthPx < 1)
 								timeBlockWidthPx = 1;
 							
@@ -548,6 +589,24 @@ public class Timeline implements IsWidget, RequiresResize, FiresTimelineEvents
 					stop = block.getStart().after(endDate);
 				}
 			}
+			
+			// stats blocks:
+			if (rowStatsBlocks.containsKey(rowId))
+			{
+				int offsetPx = statsViewportOffsetPx;
+				
+				Iterator<StatsBlock> it = rowStatsBlocks.get(rowId).iterator();
+				while(it.hasNext())
+				{
+					StatsBlock block = it.next();
+					
+					int widthPx = (int) (STATS_VIEWPORT_WIDTH * block.getPercent());
+					context.setFillStyle(block.getColor());
+					context.fillRect(offsetPx, offsetY, widthPx, ROW_HEIGHT);
+					
+					offsetPx += widthPx;
+				}
+			}
 		}
 	}
 
@@ -559,7 +618,7 @@ public class Timeline implements IsWidget, RequiresResize, FiresTimelineEvents
 	{
 		offsetPx -= VIEWPORT_OFFSET_X;
 		long offsetMillis = TimeUtils.intervalInMillis(startDate, endDate);
-		return startDate.getTime() + offsetMillis * offsetPx / getViewportWidth();
+		return startDate.getTime() + offsetMillis * offsetPx / getTimeViewportWidth();
 	}
 	
 	/**
@@ -571,7 +630,7 @@ public class Timeline implements IsWidget, RequiresResize, FiresTimelineEvents
 		long deltaMillis = millis - startDate.getTime()
 			, widthMillis = TimeUtils.intervalInMillis(startDate, endDate);
 		
-		return VIEWPORT_OFFSET_X + (int) ((double) deltaMillis * getViewportWidth() / widthMillis);
+		return VIEWPORT_OFFSET_X + (int) ((double) deltaMillis * getTimeViewportWidth() / widthMillis);
 	}
 	
 	private void drawInterval()
@@ -608,7 +667,7 @@ public class Timeline implements IsWidget, RequiresResize, FiresTimelineEvents
 		String scaleString = scale.toString();
 		
 		// Draw the time axis:
-		int viewportWidth = getViewportWidth()
+		int viewportWidth = getTimeViewportWidth()
 			, timeAxisOffsetY = heightPx 
 								- SPACING - LABEL_HEIGHT 	// 'fronteer' label
 								- SPACING - LABEL_HEIGHT	// 'tick' label
@@ -808,9 +867,9 @@ public class Timeline implements IsWidget, RequiresResize, FiresTimelineEvents
 		rowTimeBlocks.clear();
 		
 		mouseRow = null;
-		mouseMoveTime = null;
-		mouseMoveX = null;
-		mouseMoveY = null;
+		timeBrowseMillis = null;
+		timeBrowseX = null;
+		timeBrowseY = null;
 		
 		redraw();
 	}
@@ -831,6 +890,16 @@ public class Timeline implements IsWidget, RequiresResize, FiresTimelineEvents
 		
 		if (redraw && canvas.isAttached())
 			redraw();
+	}
+	
+	public void setStatsBlocks(String rowId, List<StatsBlock> blocks)
+	{
+		rowStatsBlocks.put(rowId, blocks);
+	}
+	
+	public void setStatsBlocks(Map<String, List<StatsBlock>> blocks)
+	{
+		rowStatsBlocks = blocks;
 	}
 	
 	/**
@@ -918,6 +987,11 @@ public class Timeline implements IsWidget, RequiresResize, FiresTimelineEvents
 	public void setRenderPopup(boolean renderPopup)
 	{
 		this.renderPopup = renderPopup;
+	}
+	
+	public static final String getRowBackgroundColor()
+	{
+		return ROW_BG_COLOR;
 	}
 	
 	/**
